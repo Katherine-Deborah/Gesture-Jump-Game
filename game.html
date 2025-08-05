@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Gesture Jump Game</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            image-rendering: pixelated;
+        }
+
+        #videoElement {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 160px;
+            height: 120px;
+            border: 4px solid #fff;
+            border-radius: 4px;
+            z-index: 3;
+            transform: scaleX(-1);
+        }
+
+        #gestureBar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 164px;
+            height: 24px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 3px solid #fff;
+            z-index: 2;
+        }
+
+        #gestureBarFill {
+            height: 100%;
+            background: #0f0;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            text-align: center;
+            z-index: 2;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
+        }
+
+        #score {
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        #instructions {
+            font-size: 8px;
+            max-width: 240px;
+        }
+
+        #startButton {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 12px 24px;
+            font-size: 16px;
+            background: #0f0;
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 10;
+            box-shadow: 0 4px 8px rgba(0, 255, 0, 0.5);
+            font-family: 'Press Start 2P', cursive;
+        }
+
+        #startButton:hover {
+            background: #0a0;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            z-index: 5;
+        }
+
+        #gameOverScreen h2 {
+            font-size: 32px;
+            margin-bottom: 20px;
+            text-shadow: 3px 3px 6px rgba(255, 0, 0, 1);
+        }
+
+        #finalScore {
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+
+        #restartButton {
+            padding: 12px 24px;
+            font-size: 16px;
+            background: #f00;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: 'Press Start 2P', cursive;
+        }
+
+        #restartButton:hover {
+            background: #a00;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <video id="videoElement" autoplay></video>
+
+        <div id="gestureBar">
+            <div id="gestureBarFill"></div>
+        </div>
+
+        <div id="ui">
+            <div id="score">SCORE: 0</div>
+            <div id="instructions">PINCH AND SEPARATE TO JUMP!</div>
+        </div>
+
+        <button id="startButton">START GAME</button>
+
+        <div id="gameOverScreen" class="hidden" style="display: none;">
+            <h2>GAME OVER</h2>
+            <div id="finalScore">FINAL SCORE: 0</div>
+            <button id="restartButton">PLAY AGAIN</button>
+        </div>
+    </div>
+
+    <script>
+        class GestureJumpGame {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.video = document.getElementById('videoElement');
+
+                // Game state
+                this.gameState = 'menu'; // menu, playing, gameOver
+                this.score = 0;
+                this.gameSpeed = 2;
+
+                // Player
+                this.player = {
+                    x: 100,
+                    y: 300,
+                    width: 20,
+                    height: 20,
+                    velocityY: 0,
+                    isJumping: false,
+                    color: '#0f0'
+                };
+
+                // Ground
+                this.groundY = 400;
+
+                // Obstacles
+                this.obstacles = [];
+                this.obstacleSpawnTimer = 0;
+
+                // Hand tracking
+                this.hands = null;
+                this.camera = null;
+                this.handDetected = false;
+                this.fingerDistance = 0;
+                this.maxDistance = 200;
+                this.minDistance = 20;
+                this.jumpThreshold = 80;
+                this.wasClose = false;
+                this.jumpCooldown = 0;
+
+                // Ghost trail
+                this.ghostTrail = [];
+
+                this.initCanvas();
+                this.initHandTracking();
+                this.initEventListeners();
+                this.gameLoop();
+
+                // Audio context for sound effects
+                this.audioContext = null;
+                this.initAudio();
+            }
+
+            initCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+                this.groundY = this.canvas.height - 100;
+                this.player.y = this.groundY - this.player.height;
+            }
+
+            initAudio() {
+                try {
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.log('Web Audio API not supported');
+                }
+            }
+
+            playSound(frequency, duration) {
+                if (!this.audioContext) return;
+
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+
+                oscillator.frequency.value = frequency;
+                oscillator.type = 'square';
+
+                gainNode.gain.setValueAtTime(0.3, this.audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + duration);
+
+                oscillator.start(this.audioContext.currentTime);
+                oscillator.stop(this.audioContext.currentTime + duration);
+            }
+
+            initHandTracking() {
+                this.hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+
+                this.hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 0,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                this.hands.onResults((results) => this.onHandResults(results));
+
+                this.camera = new Camera(this.video, {
+                    onFrame: async () => {
+                        await this.hands.send({image: this.video});
+                    },
+                    width: 640,
+                    height: 480
+                });
+            }
+
+            onHandResults(results) {
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    this.handDetected = true;
+                    const landmarks = results.multiHandLandmarks[0];
+
+                    // Get thumb tip (4) and index finger tip (8)
+                    const thumbTip = landmarks[4];
+                    const indexTip = landmarks[8];
+
+                    // Calculate distance
+                    const dx = (thumbTip.x - indexTip.x) * this.video.videoWidth;
+                    const dy = (thumbTip.y - indexTip.y) * this.video.videoHeight;
+                    this.fingerDistance = Math.sqrt(dx * dx + dy * dy);
+
+                    // Jump logic
+                    if (this.gameState === 'playing' && this.jumpCooldown <= 0) {
+                        if (this.fingerDistance < this.jumpThreshold) {
+                            this.wasClose = true;
+                        } else if (this.wasClose && this.fingerDistance > this.jumpThreshold) {
+                            this.jump();
+                            this.wasClose = false;
+                            this.jumpCooldown = 30; // Prevent multiple jumps
+                        }
+                    }
+                } else {
+                    this.handDetected = false;
+                    this.fingerDistance = 0;
+                }
+
+                // Update gesture bar
+                const fillPercent = Math.min(100, (this.fingerDistance / this.maxDistance) * 100);
+                document.getElementById('gestureBarFill').style.width = fillPercent + '%';
+            }
+
+            jump() {
+                if (!this.player.isJumping) {
+                    // Map finger distance to jump power
+                    const jumpPower = this.mapRange(
+                        Math.min(this.fingerDistance, this.maxDistance),
+                        this.jumpThreshold,
+                        this.maxDistance,
+                        -12,
+                        -20
+                    );
+
+                    this.player.velocityY = jumpPower;
+                    this.player.isJumping = true;
+
+                    // Add to ghost trail
+                    this.ghostTrail.push({
+                        x: this.player.x,
+                        y: this.player.y,
+                        opacity: 1
+                    });
+
+                    // Play jump sound
+                    this.playSound(440, 0.1);
+                }
+            }
+
+            mapRange(value, inMin, inMax, outMin, outMax) {
+                return (value - inMin) * (outMax - outMin) / (inMax - inMin) + outMin;
+            }
+
+            initEventListeners() {
+                document.getElementById('startButton').addEventListener('click', () => {
+                    this.startGame();
+                });
+
+                document.getElementById('restartButton').addEventListener('click', () => {
+                    this.restartGame();
+                });
+
+                window.addEventListener('resize', () => {
+                    this.initCanvas();
+                });
+            }
+
+            startGame() {
+                this.gameState = 'playing';
+                document.getElementById('startButton').classList.add('hidden');
+                this.camera.start();
+
+                // Resume audio context on user interaction
+                if (this.audioContext && this.audioContext.state === 'suspended') {
+                    this.audioContext.resume();
+                }
+            }
+
+            restartGame() {
+                this.gameState = 'playing';
+                this.score = 0;
+                this.gameSpeed = 2;
+
+                // Reset player
+                this.player.x = 100;
+                this.player.y = this.groundY - this.player.height;
+                this.player.velocityY = 0;
+                this.player.isJumping = false;
+
+                // Clear obstacles and ghost trail
+                this.obstacles = [];
+                this.ghostTrail = [];
+                this.obstacleSpawnTimer = 0;
+
+                const gameOverScreen = document.getElementById('gameOverScreen');
+                gameOverScreen.classList.add('hidden');
+                gameOverScreen.style.display = 'none';
+            }
+
+            updatePlayer() {
+                // Apply gravity
+                this.player.velocityY += 0.8;
+                this.player.y += this.player.velocityY;
+
+                // Ground collision
+                if (this.player.y >= this.groundY - this.player.height) {
+                    this.player.y = this.groundY - this.player.height;
+                    this.player.velocityY = 0;
+                    this.player.isJumping = false;
+                }
+
+                // Reduce jump cooldown
+                if (this.jumpCooldown > 0) {
+                    this.jumpCooldown--;
+                }
+            }
+
+            updateObstacles() {
+                // Spawn obstacles
+                this.obstacleSpawnTimer++;
+                if (this.obstacleSpawnTimer > 120) { // Spawn every 2 seconds at 60fps
+                    this.obstacles.push({
+                        x: this.canvas.width,
+                        y: this.groundY - 40,
+                        width: 20,
+                        height: 40,
+                        color: '#f00'
+                    });
+                    this.obstacleSpawnTimer = 0;
+                }
+
+                // Move obstacles
+                for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                    this.obstacles[i].x -= this.gameSpeed;
+
+                    // Remove off-screen obstacles
+                    if (this.obstacles[i].x + this.obstacles[i].width < 0) {
+                        this.obstacles.splice(i, 1);
+                        this.score += 10;
+
+                        // Increase game speed gradually
+                        this.gameSpeed = Math.min(6, 2 + this.score / 500);
+                    }
+                }
+            }
+
+            checkCollisions() {
+                for (let obstacle of this.obstacles) {
+                    if (this.player.x < obstacle.x + obstacle.width &&
+                        this.player.x + this.player.width > obstacle.x &&
+                        this.player.y < obstacle.y + obstacle.height &&
+                        this.player.y + this.player.height > obstacle.y) {
+
+                        this.gameOver();
+                        return;
+                    }
+                }
+            }
+
+            gameOver() {
+                this.gameState = 'gameOver';
+                document.getElementById('finalScore').textContent = `FINAL SCORE: ${this.score}`;
+                const gameOverScreen = document.getElementById('gameOverScreen');
+                gameOverScreen.classList.remove('hidden');
+                gameOverScreen.style.display = 'flex';
+
+                // Play game over sound
+                this.playSound(200, 0.5);
+            }
+
+            updateGhostTrail() {
+                for (let i = this.ghostTrail.length - 1; i >= 0; i--) {
+                    this.ghostTrail[i].opacity -= 0.05;
+                    if (this.ghostTrail[i].opacity <= 0) {
+                        this.ghostTrail.splice(i, 1);
+                    }
+                }
+            }
+
+            draw() {
+                // Clear canvas with black background
+                this.ctx.fillStyle = '#000';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Draw ground
+                this.ctx.fillStyle = '#222';
+                this.ctx.fillRect(0, this.groundY, this.canvas.width, this.canvas.height - this.groundY);
+
+                // Draw ghost trail
+                for (let ghost of this.ghostTrail) {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = ghost.opacity * 0.6;
+                    this.ctx.fillStyle = '#0f0';
+                    this.ctx.fillRect(ghost.x, ghost.y, this.player.width, this.player.height);
+                    this.ctx.restore();
+                }
+
+                // Draw player
+                this.ctx.fillStyle = this.player.color;
+                this.ctx.fillRect(this.player.x, this.player.y, this.player.width, this.player.height);
+
+                // Draw obstacles
+                for (let obstacle of this.obstacles) {
+                    this.ctx.fillStyle = obstacle.color;
+                    this.ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                }
+
+                // Draw hand status indicator
+                if (this.gameState === 'playing') {
+                    this.ctx.fillStyle = this.handDetected ? '#0f0' : '#f00';
+                    this.ctx.font = '8px "Press Start 2P"';
+                    this.ctx.fillText(
+                        this.handDetected ? 'HAND DETECTED' : 'SHOW YOUR HAND!',
+                        20,
+                        this.canvas.height - 20
+                    );
+                }
+            }
+
+            gameLoop() {
+                if (this.gameState === 'playing') {
+                    this.updatePlayer();
+                    this.updateObstacles();
+                    this.updateGhostTrail();
+                    this.checkCollisions();
+
+                    // Update score display
+                    document.getElementById('score').textContent = `SCORE: ${this.score}`;
+
+                    // Increment score based on time
+                    this.score++;
+                }
+
+                this.draw();
+                requestAnimationFrame(() => this.gameLoop());
+            }
+        }
+
+        // Start the game
+        window.addEventListener('load', () => {
+            new GestureJumpGame();
+        });
+    </script>
+</body>
+</html>
