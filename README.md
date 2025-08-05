@@ -1,6 +1,6 @@
 # Pixel Gesture Jump Game
 
-A fun and interactive pixel-themed game where you control a character using hand gestures to jump over obstacles. The game uses your device's camera to track hand movements, allowing you to jump by pinching and separating your thumb and index finger.
+A fun and interactive pixel-themed game where you control a character using hand gestures to jump over obstacles. The game uses your device's camera to track hand movements, allowing you to jump by pinching and separating your thumb and index finger. You can play the game by visiting: [Pixel Gesture Jump Game](https://gesture-jump-game.vercel.app/)
 
 ## Features
 
@@ -31,10 +31,6 @@ A fun and interactive pixel-themed game where you control a character using hand
 ## Installation
 
 No installation is required! Simply open the `index.html` file in your web browser to start playing.
-
-## Play the Game
-
-You can play the game directly by visiting: [Pixel Gesture Jump Game](https://example.com/pixel-gesture-jump-game)
 
 ## Controls
 
